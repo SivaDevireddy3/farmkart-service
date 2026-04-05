@@ -71,12 +71,25 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET,   "/api/orders/track/**").permitAll()
                         .requestMatchers(HttpMethod.PATCH, "/api/orders/*/payment").permitAll()
 
+                        // ── Customer: view own orders — MUST come before the broad
+                        //    /api/orders/** rule below or CUSTOMER role gets blocked ──
+                        .requestMatchers(HttpMethod.GET, "/api/orders/my")
+                        .hasAnyRole("CUSTOMER", "SUPER_ADMIN", "SELLER")
+
                         // ── Payments (fully public — Razorpay flow) ──────────────────
                         .requestMatchers(HttpMethod.POST, "/api/payments/**").permitAll()
 
                         // ── Reviews (public read + submit) ───────────────────────────
                         .requestMatchers(HttpMethod.GET,  "/api/reviews/mango/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/reviews").permitAll()
+
+                        // Review moderation — seller or super admin
+                        .requestMatchers(HttpMethod.GET,    "/api/reviews/pending")
+                        .hasAnyRole("SUPER_ADMIN", "SELLER")
+                        .requestMatchers(HttpMethod.PATCH,  "/api/reviews/**")
+                        .hasAnyRole("SUPER_ADMIN", "SELLER")
+                        .requestMatchers(HttpMethod.DELETE, "/api/reviews/**")
+                        .hasAnyRole("SUPER_ADMIN", "SELLER")
 
                         // ── Coupons (public validate only) ───────────────────────────
                         .requestMatchers(HttpMethod.POST, "/api/coupons/validate").permitAll()
@@ -110,13 +123,14 @@ public class SecurityConfig {
 
                         // ── Orders management — seller or super admin ────────────────
                         .requestMatchers(HttpMethod.GET,   "/api/orders").hasAnyRole("SUPER_ADMIN", "SELLER")
-                        .requestMatchers(HttpMethod.GET,   "/api/orders/**").hasAnyRole("SUPER_ADMIN", "SELLER")
+                        .requestMatchers(HttpMethod.GET,   "/api/orders/**").hasAnyRole("SUPER_ADMIN", "SELLER", "CUSTOMER")
                         .requestMatchers(HttpMethod.PATCH, "/api/orders/**").hasAnyRole("SUPER_ADMIN", "SELLER")
                         .requestMatchers(HttpMethod.GET,   "/api/orders/stats/summary")
                         .hasAnyRole("SUPER_ADMIN", "SELLER")
 
-                        // ── FIX Bug 7: anyRequest uses SUPER_ADMIN (matches what login generates)
-                        .anyRequest().hasAnyRole("SUPER_ADMIN", "SELLER")
+                        // ── FIX Bug 7: anyRequest also allows CUSTOMER so logged-in
+                        //    customers aren't blocked on non-listed endpoints
+                        .anyRequest().hasAnyRole("SUPER_ADMIN", "SELLER", "CUSTOMER")
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 

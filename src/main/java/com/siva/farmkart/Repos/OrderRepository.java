@@ -23,8 +23,11 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     List<Order> findByStatusOrderByCreatedAtDesc(Order.OrderStatus status);
 
-    // Seller-scoped queries (fix for OrderController seller isolation)
+    // Seller-scoped queries
     List<Order> findBySeller_IdOrderByCreatedAtDesc(Long sellerId);
+
+    // Customer-scoped queries
+    List<Order> findByCustomer_IdOrderByCreatedAtDesc(Long customerId);
 
     long countByIsNewNotificationTrue();
 

@@ -19,6 +19,8 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/mangoes")
@@ -71,19 +73,37 @@ public class MangoController {
         if (adminView) {
             // Admin/Seller view — all mangoes (available + unavailable)
             if (sellerId != null) {
-                // FIX Bug 5: filter by seller when sellerId provided
                 mangoes = mangoRepository.findBySellerId(sellerId);
             } else if (category != null && !category.isEmpty()) {
                 mangoes = mangoRepository.findByCategory(category);
             } else {
                 mangoes = mangoRepository.findAll();
             }
-        } else if (search != null && !search.isEmpty()) {
-            mangoes = mangoRepository.findByNameContainingIgnoreCaseAndIsAvailableTrue(search);
-        } else if (category != null && !category.isEmpty()) {
-            mangoes = mangoRepository.findByCategoryAndIsAvailableTrue(category);
         } else {
-            mangoes = mangoRepository.findByIsAvailableTrue();
+            // Public storefront — only available mangoes, support combined filters
+            if (sellerId != null) {
+                // Get all available mangoes for this seller, then apply category/search in-memory
+                mangoes = mangoRepository.findBySellerId(sellerId).stream()
+                        .filter(Mango::getIsAvailable)
+                        .filter(m -> category == null || category.isEmpty()
+                                || category.equalsIgnoreCase(m.getCategory()))
+                        .filter(m -> search == null || search.isEmpty()
+                                || m.getName().toLowerCase().contains(search.toLowerCase()))
+                        .collect(java.util.stream.Collectors.toList());
+            } else if (search != null && !search.isEmpty()) {
+                mangoes = mangoRepository.findByNameContainingIgnoreCaseAndIsAvailableTrue(search);
+                // Also apply category filter if present
+                if (category != null && !category.isEmpty()) {
+                    final String cat = category;
+                    mangoes = mangoes.stream()
+                            .filter(m -> cat.equalsIgnoreCase(m.getCategory()))
+                            .collect(java.util.stream.Collectors.toList());
+                }
+            } else if (category != null && !category.isEmpty()) {
+                mangoes = mangoRepository.findByCategoryAndIsAvailableTrue(category);
+            } else {
+                mangoes = mangoRepository.findByIsAvailableTrue();
+            }
         }
 
         return ResponseEntity.ok(mangoes);
@@ -101,8 +121,20 @@ public class MangoController {
     // ── PUBLIC: Get categories ────────────────────────────────────────────────
 
     @GetMapping("/categories")
-    public ResponseEntity<List<String>> getCategories() {
-        return ResponseEntity.ok(mangoRepository.findAllCategories());
+    public ResponseEntity<List<String>> getCategories(
+            @RequestParam(required = false) Long sellerId) {
+        if (sellerId != null) {
+            // Return categories for a specific seller's available mangoes
+            List<String> cats = mangoRepository.findBySeller_Id(sellerId).stream()
+                    .filter(Mango::getIsAvailable)
+                    .map(Mango::getCategory)
+                    .filter(c -> c != null && !c.isBlank())
+                    .distinct()
+                    .sorted()
+                    .toList();
+            return ResponseEntity.ok(cats);
+        }
+        return ResponseEntity.ok(mangoRepository.findAllActiveCategories());
     }
 
     // ── SELLER / ADMIN: Create mango ──────────────────────────────────────────

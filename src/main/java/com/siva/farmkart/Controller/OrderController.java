@@ -26,6 +26,7 @@ public class OrderController {
     @Autowired private OrderRepository orderRepository;
     @Autowired private MangoRepository mangoRepository;
     @Autowired private SellerRepository sellerRepository;
+    @Autowired private CustomerRepository customerRepository;
     @Autowired private NotificationService notificationService;
     @Autowired private JwtUtil jwtUtil;
 
@@ -46,7 +47,7 @@ public class OrderController {
     // ── PUBLIC: Place order ───────────────────────────────────────────────────
 
     @PostMapping
-    public ResponseEntity<?> placeOrder(@RequestBody OrderRequest request) {
+    public ResponseEntity<?> placeOrder(@RequestBody OrderRequest request, Authentication auth) {
         try {
             if (request.getCustomerPhone() == null || request.getCustomerPhone().isBlank())
                 return ResponseEntity.badRequest().body(Map.of("message", "Mobile number is required"));
@@ -57,7 +58,7 @@ public class OrderController {
 
             List<OrderItem> items = new ArrayList<>();
             BigDecimal total = BigDecimal.ZERO;
-            Seller orderSeller = null; // derive seller from first cart item
+            Seller orderSeller = null;
 
             for (OrderRequest.CartItem cartItem : request.getItems()) {
                 Mango mango = mangoRepository.findById(cartItem.getMangoId())
@@ -75,9 +76,18 @@ public class OrderController {
                         .unitPrice(mango.getPrice()).totalPrice(itemTotal)
                         .build());
 
-                // Assign seller from the first mango (single-seller cart assumed)
                 if (orderSeller == null && mango.getSeller() != null) {
                     orderSeller = mango.getSeller();
+                }
+            }
+
+            // Link to customer account if logged in as CUSTOMER
+            Customer linkedCustomer = null;
+            if (auth != null) {
+                boolean isCustomer = auth.getAuthorities().stream()
+                        .anyMatch(a -> a.getAuthority().equals("ROLE_CUSTOMER"));
+                if (isCustomer) {
+                    linkedCustomer = customerRepository.findByMobile(auth.getName()).orElse(null);
                 }
             }
 
@@ -98,6 +108,7 @@ public class OrderController {
                     .paymentStatus(Order.PaymentStatus.PENDING)
                     .isNewNotification(true)
                     .seller(orderSeller)
+                    .customer(linkedCustomer)
                     .build();
 
             Order savedOrder = orderRepository.save(order);
@@ -105,7 +116,6 @@ public class OrderController {
             savedOrder.setItems(items);
             Order finalOrder = orderRepository.save(savedOrder);
 
-            // Deduct stock
             for (int i = 0; i < items.size(); i++) {
                 Mango mango = items.get(i).getMango();
                 mango.setStock(mango.getStock() - request.getItems().get(i).getQuantity());
@@ -135,6 +145,18 @@ public class OrderController {
         return orderRepository.findByOrderNumber(orderNumber)
                 .map(ResponseEntity::ok)
                 .orElse(ResponseEntity.notFound().build());
+    }
+
+    // ── CUSTOMER: Get my orders ───────────────────────────────────────────────
+
+    @GetMapping("/my")
+    public ResponseEntity<?> getMyOrders(Authentication auth) {
+        if (auth == null) return ResponseEntity.status(401).build();
+        String mobile = auth.getName(); // subject = mobile for customers
+        Customer customer = customerRepository.findByMobile(mobile).orElse(null);
+        if (customer == null) return ResponseEntity.status(404).body(Map.of("message", "Customer not found"));
+        List<Order> orders = orderRepository.findByCustomer_IdOrderByCreatedAtDesc(customer.getId());
+        return ResponseEntity.ok(orders);
     }
 
     // ── PUBLIC: Update payment ────────────────────────────────────────────────
